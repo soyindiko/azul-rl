@@ -12,8 +12,15 @@ that are better than the raw network output. By training the network to match
 MCTS output, the network improves, which in turn improves MCTS, creating a
 virtuous cycle of improvement.
 
-Optimized for Apple Silicon (M1/M2/M3/M4) with MPS (Metal Performance Shaders) support
-and parallel self-play using multiple CPU cores.
+Optimized for:
+- Apple Silicon (M1/M2/M3/M4) with MPS (Metal Performance Shaders) support
+- NVIDIA GPUs with CUDA and Automatic Mixed Precision (AMP) for Tensor Core acceleration
+- Parallel self-play using multiple CPU cores
+
+Mixed Precision (AMP):
+- Enabled automatically on CUDA devices with Tensor Cores (T4, V100, A100, etc.)
+- Uses FP16 for forward pass and FP32 for gradients
+- Can provide 2-3x speedup on supported hardware with minimal accuracy loss
 
 Usage:
     python train.py                           # Basic training with auto-detected settings
@@ -68,6 +75,57 @@ def get_best_device() -> torch.device:
     else:
         # Fallback to CPU
         return torch.device("cpu")
+
+
+def should_use_amp(device: torch.device) -> bool:
+    """
+    Determine if Automatic Mixed Precision (AMP) should be used.
+    
+    AMP uses FP16 for forward pass computations while keeping FP32 for
+    gradient accumulation. This can provide significant speedups on
+    GPUs with Tensor Cores (NVIDIA Volta, Turing, Ampere architectures).
+    
+    When to use AMP:
+    - CUDA devices: Yes, especially T4, V100, A100, etc.
+    - MPS (Apple Silicon): No, MPS has limited AMP support and can cause issues
+    - CPU: No, AMP is designed for GPU acceleration
+    
+    Args:
+        device: The compute device being used
+    
+    Returns:
+        True if AMP should be enabled, False otherwise
+    """
+    if device.type == "cuda":
+        # Check if CUDA supports AMP (requires compute capability >= 7.0 for best results)
+        # but it works on older GPUs too, just without Tensor Core acceleration
+        return True
+    elif device.type == "mps":
+        # MPS has experimental AMP support, but it's not stable
+        # Better to skip for now on Apple Silicon
+        return False
+    else:
+        # CPU - no benefit from AMP
+        return False
+
+
+def get_amp_context(use_amp: bool, device: torch.device):
+    """
+    Get the appropriate autocast context manager for mixed precision.
+    
+    Args:
+        use_amp: Whether AMP is enabled
+        device: The compute device
+    
+    Returns:
+        Context manager for autocast (or nullcontext if AMP disabled)
+    """
+    if use_amp and device.type == "cuda":
+        return torch.cuda.amp.autocast()
+    else:
+        # Return a no-op context manager
+        from contextlib import nullcontext
+        return nullcontext()
 
 
 # =============================================================================
@@ -770,6 +828,22 @@ class Trainer:
         )
         
         # -----------------------------------------------------------------
+        # Automatic Mixed Precision (AMP) setup
+        # AMP uses FP16 for forward pass on CUDA to leverage Tensor Cores
+        # GradScaler prevents gradient underflow in FP16
+        # -----------------------------------------------------------------
+        self.use_amp = should_use_amp(self.device)
+        if self.use_amp:
+            self.scaler = torch.cuda.amp.GradScaler()
+            print(f"⚡ Mixed Precision (AMP) enabled for faster training")
+        else:
+            self.scaler = None
+            if self.device.type == "mps":
+                print(f"💻 MPS device detected - using full precision (AMP not recommended for MPS)")
+            elif self.device.type == "cpu":
+                print(f"💻 CPU device - AMP not applicable")
+        
+        # -----------------------------------------------------------------
         # Replay buffer for storing self-play experiences
         # -----------------------------------------------------------------
         self.buffer = ReplayBuffer(capacity=buffer_size)
@@ -952,6 +1026,10 @@ class Trainer:
         1. Match MCTS policies (cross-entropy loss)
         2. Predict game outcomes (MSE loss)
         
+        Uses Automatic Mixed Precision (AMP) on CUDA devices for faster training.
+        AMP keeps FP32 precision for gradient accumulation while using FP16
+        for forward pass, leveraging Tensor Cores on supported GPUs.
+        
         Returns:
             Dictionary with loss values for logging
         """
@@ -972,42 +1050,60 @@ class Trainer:
         target_policies = target_policies.to(self.device)
         target_values = target_values.to(self.device)
         
-        # -----------------------------------------------------------------
-        # Forward pass
-        # -----------------------------------------------------------------
-        policy_logits, values = self.network(states)
-        
-        # -----------------------------------------------------------------
-        # Compute losses
-        # -----------------------------------------------------------------
-        
-        # Policy loss: cross-entropy between network output and MCTS policy
-        # This teaches the network to predict what MCTS would choose
-        policy_loss = F.cross_entropy(policy_logits, target_policies)
-        
-        # Value loss: MSE between predicted and actual game outcome
-        # This teaches the network to evaluate positions accurately
-        value_loss = F.mse_loss(values.squeeze(), target_values)
-        
-        # Combined loss (equal weighting of both objectives)
-        total_loss = policy_loss + value_loss
-        
-        # -----------------------------------------------------------------
-        # Backward pass and optimization
-        # -----------------------------------------------------------------
-        
         # Clear gradients from previous step
         self.optimizer.zero_grad()
         
-        # Compute gradients
-        total_loss.backward()
+        # -----------------------------------------------------------------
+        # Forward pass (with optional Mixed Precision)
+        # autocast automatically converts operations to FP16 where safe
+        # -----------------------------------------------------------------
+        with get_amp_context(self.use_amp, self.device):
+            policy_logits, values = self.network(states)
+            
+            # -----------------------------------------------------------------
+            # Compute losses
+            # -----------------------------------------------------------------
+            
+            # Policy loss: cross-entropy between network output and MCTS policy
+            # This teaches the network to predict what MCTS would choose
+            policy_loss = F.cross_entropy(policy_logits, target_policies)
+            
+            # Value loss: MSE between predicted and actual game outcome
+            # This teaches the network to evaluate positions accurately
+            value_loss = F.mse_loss(values.squeeze(), target_values)
+            
+            # Combined loss (equal weighting of both objectives)
+            total_loss = policy_loss + value_loss
         
-        # Gradient clipping prevents exploding gradients
-        # Max norm of 1.0 is a common safe value
-        torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=1.0)
-        
-        # Update weights
-        self.optimizer.step()
+        # -----------------------------------------------------------------
+        # Backward pass and optimization
+        # With AMP: GradScaler prevents gradient underflow in FP16
+        # Without AMP: Standard backward pass
+        # -----------------------------------------------------------------
+        if self.use_amp and self.scaler is not None:
+            # Scale loss to prevent FP16 underflow, then backward
+            self.scaler.scale(total_loss).backward()
+            
+            # Unscale gradients before clipping
+            self.scaler.unscale_(self.optimizer)
+            
+            # Gradient clipping prevents exploding gradients
+            torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=1.0)
+            
+            # Optimizer step with scaler (skips if gradients contain inf/nan)
+            self.scaler.step(self.optimizer)
+            
+            # Update scaler for next iteration
+            self.scaler.update()
+        else:
+            # Standard backward pass (CPU or MPS)
+            total_loss.backward()
+            
+            # Gradient clipping prevents exploding gradients
+            torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=1.0)
+            
+            # Update weights
+            self.optimizer.step()
         
         self.train_steps += 1
         
@@ -1134,25 +1230,37 @@ class Trainer:
         - Network weights
         - Optimizer state (momentum, etc.)
         - Scheduler state
+        - GradScaler state (if using AMP)
         - Training statistics
         
         Args:
             path: File path for the checkpoint
         """
-        torch.save({
+        checkpoint = {
             "network_state_dict": self.network.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "scheduler_state_dict": self.scheduler.state_dict(),
             "train_steps": self.train_steps,
             "games_played": self.games_played,
-            "iteration": self.iteration
-        }, path)
+            "iteration": self.iteration,
+            "use_amp": self.use_amp  # Save AMP state for reference
+        }
+        
+        # Save GradScaler state if using AMP
+        if self.use_amp and self.scaler is not None:
+            checkpoint["scaler_state_dict"] = self.scaler.state_dict()
+        
+        torch.save(checkpoint, path)
     
     def load(self, path: str) -> None:
         """
         Load model checkpoint from disk.
         
         Restores all state needed to continue training.
+        Handles AMP/GradScaler state intelligently:
+        - If checkpoint was saved with AMP and we're using AMP: restore scaler state
+        - If checkpoint was saved without AMP but we're using AMP: initialize fresh scaler
+        - If checkpoint was saved with AMP but we're not using AMP: ignore scaler state
         
         Args:
             path: File path to the checkpoint
@@ -1165,6 +1273,14 @@ class Trainer:
         self.train_steps = checkpoint["train_steps"]
         self.games_played = checkpoint["games_played"]
         self.iteration = checkpoint.get("iteration", 0)
+        
+        # Restore GradScaler state if available and we're using AMP
+        if self.use_amp and self.scaler is not None and "scaler_state_dict" in checkpoint:
+            self.scaler.load_state_dict(checkpoint["scaler_state_dict"])
+            print(f"⚡ Restored AMP GradScaler state")
+        elif self.use_amp and "scaler_state_dict" not in checkpoint:
+            print(f"⚡ AMP enabled but checkpoint has no scaler state (starting fresh)")
+        
         print(f"📂 Loaded checkpoint from iteration {self.iteration + 1}")
         print(f"   Games played: {self.games_played}")
         print(f"   Train steps: {self.train_steps}")
