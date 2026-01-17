@@ -41,6 +41,8 @@ import os
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
+import json
+from datetime import datetime
 
 from azul.game import AzulGame
 from azul.constants import (
@@ -854,6 +856,12 @@ class Trainer:
         self.train_steps = 0     # Total gradient updates
         self.games_played = 0    # Total self-play games
         self.iteration = 0       # Current training iteration
+        
+        # -----------------------------------------------------------------
+        # Training history for logging and visualization
+        # Stores metrics from each iteration for later analysis
+        # -----------------------------------------------------------------
+        self.training_history = []
     
     def self_play(
         self,
@@ -1207,6 +1215,7 @@ class Trainer:
             # -------------------------------------------------------------
             iter_time = time.time() - iter_start
             total_time = time.time() - start_time
+            current_lr = self.scheduler.get_last_lr()[0]
             
             print(f"\n📈 Losses:")
             print(f"   Policy loss: {avg_loss['policy_loss']:.4f}")
@@ -1215,7 +1224,26 @@ class Trainer:
             print(f"\n⏱️  Iteration time: {iter_time:.1f}s")
             print(f"   Total time: {total_time/60:.1f} minutes")
             print(f"🎯 Games played: {self.games_played}")
-            print(f"📚 Learning rate: {self.scheduler.get_last_lr()[0]:.6f}")
+            print(f"📚 Learning rate: {current_lr:.6f}")
+            
+            # -------------------------------------------------------------
+            # Record training history for later visualization
+            # -------------------------------------------------------------
+            history_entry = {
+                "iteration": global_iteration + 1,
+                "timestamp": datetime.now().isoformat(),
+                "policy_loss": float(avg_loss['policy_loss']),
+                "value_loss": float(avg_loss['value_loss']),
+                "total_loss": float(avg_loss['total_loss']),
+                "learning_rate": float(current_lr),
+                "games_played": self.games_played,
+                "train_steps": self.train_steps,
+                "buffer_size": len(self.buffer),
+                "experiences_generated": num_exp,
+                "iteration_time": iter_time,
+                "total_time": total_time
+            }
+            self.training_history.append(history_entry)
             
             # -------------------------------------------------------------
             # Save checkpoint periodically
@@ -1226,6 +1254,9 @@ class Trainer:
                 path = f"{save_path}/model_iter_{global_iteration + 1}.pt"
                 self.save(path)
                 print(f"\n💾 Saved checkpoint: {path}")
+                
+                # Save training history alongside checkpoint
+                self.save_training_history(f"{save_path}/training_history.json")
         
         # Save final model with global iteration number
         final_iteration = start_iteration + num_iterations
@@ -1238,6 +1269,71 @@ class Trainer:
         print(f"   Total train steps: {self.train_steps}")
         print(f"   Final model: {final_path}")
         print(f"{'='*60}")
+        
+        # Save final training history
+        self.save_training_history(f"{save_path}/training_history.json")
+    
+    def save_training_history(self, path: str) -> None:
+        """
+        Save training history to a JSON file for visualization.
+        
+        The history contains per-iteration metrics:
+        - Losses (policy, value, total)
+        - Learning rate
+        - Games played, train steps
+        - Timing information
+        
+        If the file already exists, it merges the new history with existing data,
+        avoiding duplicates based on iteration number.
+        
+        Args:
+            path: File path for the JSON history file
+        """
+        # Load existing history if file exists
+        existing_history = []
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    existing_history = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                existing_history = []
+        
+        # Merge histories, avoiding duplicates by iteration number
+        existing_iterations = {h['iteration'] for h in existing_history}
+        merged_history = existing_history.copy()
+        
+        for entry in self.training_history:
+            if entry['iteration'] not in existing_iterations:
+                merged_history.append(entry)
+        
+        # Sort by iteration
+        merged_history.sort(key=lambda x: x['iteration'])
+        
+        # Save to file
+        with open(path, 'w') as f:
+            json.dump(merged_history, f, indent=2)
+        
+        print(f"📊 Training history saved to: {path} ({len(merged_history)} entries)")
+    
+    def load_training_history(self, path: str) -> None:
+        """
+        Load training history from a JSON file.
+        
+        Called when resuming training to continue logging from where we left off.
+        
+        Args:
+            path: File path to the JSON history file
+        """
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    self.training_history = json.load(f)
+                print(f"📊 Loaded training history: {len(self.training_history)} entries")
+            except (json.JSONDecodeError, IOError):
+                print(f"⚠️ Could not load training history, starting fresh")
+                self.training_history = []
+        else:
+            self.training_history = []
     
     def save(self, path: str) -> None:
         """
@@ -1297,6 +1393,11 @@ class Trainer:
             print(f"⚡ Restored AMP GradScaler state")
         elif self.use_amp and "scaler_state_dict" not in checkpoint:
             print(f"⚡ AMP enabled but checkpoint has no scaler state (starting fresh)")
+        
+        # Try to load training history from the same directory
+        checkpoint_dir = os.path.dirname(path)
+        history_path = os.path.join(checkpoint_dir, "training_history.json")
+        self.load_training_history(history_path)
         
         print(f"📂 Loaded checkpoint from iteration {self.iteration + 1}")
         print(f"   Games played: {self.games_played}")
