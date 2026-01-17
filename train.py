@@ -1139,10 +1139,20 @@ class Trainer:
         # Create checkpoint directory
         os.makedirs(save_path, exist_ok=True)
         
+        # -----------------------------------------------------------------
+        # Calculate starting iteration for resume support
+        # If resuming, self.iteration contains the last completed iteration
+        # We start from the next one
+        # -----------------------------------------------------------------
+        start_iteration = self.iteration + 1 if self.iteration > 0 else 0
+        end_iteration = start_iteration + num_iterations
+        
         # Print training configuration
         print(f"\n🎮 Starting Azul RL Training")
         print(f"{'='*60}")
-        print(f"   Iterations:        {num_iterations}")
+        if start_iteration > 0:
+            print(f"   📂 Resuming from iteration {start_iteration}")
+        print(f"   Iterations:        {start_iteration} → {end_iteration} ({num_iterations} new)")
         print(f"   Games/iteration:   {games_per_iteration}")
         print(f"   Train steps/iter:  {train_steps_per_iteration}")
         print(f"   MCTS simulations:  {self.num_simulations}")
@@ -1155,13 +1165,16 @@ class Trainer:
         
         # -----------------------------------------------------------------
         # Main training loop
+        # Uses global iteration count for checkpoints and logging
         # -----------------------------------------------------------------
-        for iteration in range(num_iterations):
-            self.iteration = iteration
+        for i in range(num_iterations):
+            # Calculate the global iteration number
+            global_iteration = start_iteration + i
+            self.iteration = global_iteration
             iter_start = time.time()
             
             print(f"\n{'='*60}")
-            print(f"=== Iteration {iteration + 1}/{num_iterations} ===")
+            print(f"=== Iteration {global_iteration + 1}/{end_iteration} (this session: {i + 1}/{num_iterations}) ===")
             print(f"{'='*60}")
             
             # -------------------------------------------------------------
@@ -1206,17 +1219,21 @@ class Trainer:
             
             # -------------------------------------------------------------
             # Save checkpoint periodically
+            # Uses global iteration number so checkpoints are sequential
+            # even when resuming from a previous training run
             # -------------------------------------------------------------
-            if (iteration + 1) % save_interval == 0:
-                path = f"{save_path}/model_iter_{iteration + 1}.pt"
+            if (global_iteration + 1) % save_interval == 0:
+                path = f"{save_path}/model_iter_{global_iteration + 1}.pt"
                 self.save(path)
                 print(f"\n💾 Saved checkpoint: {path}")
         
-        # Save final model
-        final_path = f"{save_path}/model_final.pt"
+        # Save final model with global iteration number
+        final_iteration = start_iteration + num_iterations
+        final_path = f"{save_path}/model_iter_{final_iteration}.pt"
         self.save(final_path)
         print(f"\n{'='*60}")
         print(f"✅ Training complete!")
+        print(f"   Total iterations: {final_iteration}")
         print(f"   Total games: {self.games_played}")
         print(f"   Total train steps: {self.train_steps}")
         print(f"   Final model: {final_path}")

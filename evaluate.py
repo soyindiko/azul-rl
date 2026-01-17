@@ -36,6 +36,9 @@ import time
 import os
 import sys
 import traceback
+import json
+import re
+from datetime import datetime
 
 from azul.game import AzulGame
 from azul.constants import TileColor, PATTERN_LINES
@@ -855,6 +858,246 @@ def print_summary(all_results: Dict, model_name: str = "Model") -> None:
 
 
 # =============================================================================
+# EVALUATION HISTORY
+# =============================================================================
+
+DEFAULT_HISTORY_FILE = "evaluation_history.json"
+
+
+def extract_iteration_from_path(model_path: str) -> Optional[int]:
+    """
+    Extract the iteration number from a model checkpoint path.
+    
+    Supports formats like:
+    - model_iter_100.pt
+    - checkpoints/model_iter_500.pt
+    - model_final.pt (returns None)
+    
+    Args:
+        model_path: Path to the model checkpoint
+    
+    Returns:
+        Iteration number or None if not found
+    """
+    # Try to extract iteration number from filename
+    match = re.search(r'iter[_-]?(\d+)', model_path, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def save_evaluation_to_history(
+    model_path: str,
+    all_results: Dict,
+    num_games: int,
+    num_simulations: int,
+    history_file: str = DEFAULT_HISTORY_FILE
+) -> None:
+    """
+    Save evaluation results to a JSON history file.
+    
+    Creates a cumulative record of all evaluations for tracking
+    model improvement over time.
+    
+    Args:
+        model_path: Path to the evaluated model
+        all_results: Dictionary with all match results
+        num_games: Number of games per matchup
+        num_simulations: MCTS simulations used
+        history_file: Path to the history JSON file
+    """
+    # Load existing history or create new
+    history = []
+    if os.path.exists(history_file):
+        try:
+            with open(history_file, 'r') as f:
+                history = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            print(f"⚠️ Could not read existing history file, creating new one")
+            history = []
+    
+    # Extract iteration from model path
+    iteration = extract_iteration_from_path(model_path)
+    
+    # Calculate statistics for each matchup
+    summary = {}
+    for matchup, results in all_results.items():
+        stats = calculate_statistics(results)
+        summary[matchup] = {
+            "win_rate": round(stats["p1_winrate"], 2),
+            "avg_score": round(stats["p1_avg_score"], 2),
+            "avg_margin": round(stats["avg_margin"], 2),
+            "total_games": stats["total_games"]
+        }
+    
+    # Create entry
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "model_path": model_path,
+        "model_name": os.path.basename(model_path),
+        "iteration": iteration,
+        "num_games": num_games,
+        "num_simulations": num_simulations,
+        "results": summary
+    }
+    
+    # Append to history
+    history.append(entry)
+    
+    # Save to file
+    with open(history_file, 'w') as f:
+        json.dump(history, f, indent=2)
+    
+    print(f"\n💾 Evaluation saved to: {history_file}")
+
+
+def show_evaluation_history(history_file: str = DEFAULT_HISTORY_FILE) -> None:
+    """
+    Display the evaluation history in a formatted table.
+    
+    Shows progression of model performance over training iterations.
+    
+    Args:
+        history_file: Path to the history JSON file
+    """
+    if not os.path.exists(history_file):
+        print(f"❌ No history file found: {history_file}")
+        print("   Run evaluations with --save-history to start tracking.")
+        return
+    
+    try:
+        with open(history_file, 'r') as f:
+            history = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"❌ Error reading history file: {e}")
+        return
+    
+    if not history:
+        print("📭 History file is empty. Run some evaluations first!")
+        return
+    
+    # Sort by iteration (if available) or timestamp
+    history.sort(key=lambda x: (x.get("iteration") or 0, x.get("timestamp", "")))
+    
+    print("\n" + "=" * 90)
+    print("📊 EVALUATION HISTORY")
+    print("=" * 90)
+    
+    # Header
+    print(f"\n{'Iter':<8} {'Date':<12} {'vs Random':>12} {'vs Greedy':>12} {'Score Margin':>14} {'Games':>8}")
+    print("-" * 90)
+    
+    for entry in history:
+        iter_str = str(entry.get("iteration", "?"))
+        
+        # Parse timestamp
+        try:
+            ts = datetime.fromisoformat(entry["timestamp"])
+            date_str = ts.strftime("%Y-%m-%d")
+        except:
+            date_str = "?"
+        
+        # Get win rates
+        vs_random = entry.get("results", {}).get("vs_random", {})
+        vs_greedy = entry.get("results", {}).get("vs_greedy", {})
+        
+        random_wr = vs_random.get("win_rate", 0)
+        greedy_wr = vs_greedy.get("win_rate", 0)
+        random_margin = vs_random.get("avg_margin", 0)
+        greedy_margin = vs_greedy.get("avg_margin", 0)
+        
+        # Use random margin as primary, greedy as secondary
+        margin = random_margin if random_margin != 0 else greedy_margin
+        
+        games = entry.get("num_games", "?")
+        
+        # Color coding based on performance
+        random_str = f"{random_wr:>10.1f}%"
+        greedy_str = f"{greedy_wr:>10.1f}%"
+        
+        print(f"{iter_str:<8} {date_str:<12} {random_str:>12} {greedy_str:>12} {margin:>+13.1f} {games:>8}")
+    
+    print("-" * 90)
+    print(f"Total evaluations: {len(history)}")
+    
+    # Show improvement summary if we have multiple entries
+    if len(history) >= 2:
+        first = history[0]
+        last = history[-1]
+        
+        first_random = first.get("results", {}).get("vs_random", {}).get("win_rate", 0)
+        last_random = last.get("results", {}).get("vs_random", {}).get("win_rate", 0)
+        
+        first_greedy = first.get("results", {}).get("vs_greedy", {}).get("win_rate", 0)
+        last_greedy = last.get("results", {}).get("vs_greedy", {}).get("win_rate", 0)
+        
+        print(f"\n📈 Progress Summary:")
+        print(f"   vs Random: {first_random:.1f}% → {last_random:.1f}% ({last_random - first_random:+.1f}%)")
+        print(f"   vs Greedy: {first_greedy:.1f}% → {last_greedy:.1f}% ({last_greedy - first_greedy:+.1f}%)")
+    
+    print("=" * 90)
+
+
+def export_history_csv(history_file: str = DEFAULT_HISTORY_FILE, output_file: str = "evaluation_history.csv") -> None:
+    """
+    Export evaluation history to CSV format for analysis in spreadsheets.
+    
+    Args:
+        history_file: Path to the history JSON file
+        output_file: Path for the output CSV file
+    """
+    if not os.path.exists(history_file):
+        print(f"❌ No history file found: {history_file}")
+        return
+    
+    try:
+        with open(history_file, 'r') as f:
+            history = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"❌ Error reading history file: {e}")
+        return
+    
+    if not history:
+        print("📭 History file is empty.")
+        return
+    
+    # Create CSV content
+    headers = [
+        "timestamp", "model_name", "iteration", "num_games", "num_simulations",
+        "vs_random_winrate", "vs_random_margin", "vs_random_score",
+        "vs_greedy_winrate", "vs_greedy_margin", "vs_greedy_score"
+    ]
+    
+    rows = []
+    for entry in history:
+        vs_random = entry.get("results", {}).get("vs_random", {})
+        vs_greedy = entry.get("results", {}).get("vs_greedy", {})
+        
+        row = [
+            entry.get("timestamp", ""),
+            entry.get("model_name", ""),
+            entry.get("iteration", ""),
+            entry.get("num_games", ""),
+            entry.get("num_simulations", ""),
+            vs_random.get("win_rate", ""),
+            vs_random.get("avg_margin", ""),
+            vs_random.get("avg_score", ""),
+            vs_greedy.get("win_rate", ""),
+            vs_greedy.get("avg_margin", ""),
+            vs_greedy.get("avg_score", "")
+        ]
+        rows.append(row)
+    
+    # Write CSV
+    with open(output_file, 'w') as f:
+        f.write(",".join(headers) + "\n")
+        for row in rows:
+            f.write(",".join(str(x) for x in row) + "\n")
+    
+    print(f"📄 History exported to: {output_file}")
+
+
+# =============================================================================
 # EVALUATION FUNCTIONS
 # =============================================================================
 
@@ -865,7 +1108,9 @@ def evaluate_model(
     include_mcts_baseline: bool = True,
     parallel: bool = True,
     num_workers: int = 0,
-    device: str = "auto"
+    device: str = "auto",
+    save_history: bool = False,
+    history_file: str = DEFAULT_HISTORY_FILE
 ) -> Dict:
     """
     Comprehensive evaluation of a trained model against multiple baselines.
@@ -884,6 +1129,8 @@ def evaluate_model(
         parallel: Use parallel game execution
         num_workers: Number of parallel workers (0 = auto)
         device: Compute device for neural network
+        save_history: Whether to save results to history file
+        history_file: Path to the history JSON file
     
     Returns:
         Dictionary with all evaluation results
@@ -1013,6 +1260,16 @@ def evaluate_model(
     print(f"\n⏱️ Total evaluation time: {elapsed:.1f}s")
     
     print_summary(all_results, os.path.basename(model_path))
+    
+    # Save to history if requested
+    if save_history:
+        save_evaluation_to_history(
+            model_path=model_path,
+            all_results=all_results,
+            num_games=num_games,
+            num_simulations=num_simulations,
+            history_file=history_file
+        )
     
     return all_results
 
@@ -1336,10 +1593,44 @@ Examples:
         help="Compute device (default: auto)"
     )
     
+    # History tracking
+    parser.add_argument(
+        "--save-history", "-H",
+        action="store_true",
+        help="Save evaluation results to history file for tracking progress"
+    )
+    parser.add_argument(
+        "--history-file",
+        type=str,
+        default=DEFAULT_HISTORY_FILE,
+        help=f"Path to history JSON file (default: {DEFAULT_HISTORY_FILE})"
+    )
+    parser.add_argument(
+        "--show-history",
+        action="store_true",
+        help="Display evaluation history and exit"
+    )
+    parser.add_argument(
+        "--export-csv",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help="Export history to CSV file"
+    )
+    
     args = parser.parse_args()
     
     # Determine parallel setting
     parallel = args.parallel and not args.no_parallel
+    
+    # Handle history commands first
+    if args.show_history:
+        show_evaluation_history(args.history_file)
+        return
+    
+    if args.export_csv:
+        export_history_csv(args.history_file, args.export_csv)
+        return
     
     # Route to appropriate function
     if args.quick_test:
@@ -1365,7 +1656,9 @@ Examples:
             include_mcts_baseline=not args.no_mcts_baseline,
             parallel=parallel,
             num_workers=args.workers,
-            device=args.device
+            device=args.device,
+            save_history=args.save_history,
+            history_file=args.history_file
         )
     else:
         # No arguments - show help
