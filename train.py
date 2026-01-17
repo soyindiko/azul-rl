@@ -25,7 +25,8 @@ Mixed Precision (AMP):
 Usage:
     python train.py                           # Basic training with auto-detected settings
     python train.py --num-iterations 500      # Custom number of iterations
-    python train.py --resume checkpoint.pt    # Resume from checkpoint
+    python train.py --resume                  # Resume from latest checkpoint (auto-detect)
+    python train.py --resume checkpoint.pt    # Resume from specific checkpoint
 """
 
 import numpy as np
@@ -49,6 +50,51 @@ from azul.constants import (
     NUM_TILE_COLORS, PATTERN_LINES, WALL_SIZE, FLOOR_LINE_SIZE,
     FACTORIES_BY_PLAYERS
 )
+import glob
+import re
+
+
+def find_latest_checkpoint(directory: str = "checkpoints") -> Optional[str]:
+    """
+    Find the most recent checkpoint file in the specified directory.
+    
+    Searches for files matching 'model_iter_*.pt' pattern and returns
+    the one with the highest iteration number.
+    
+    Args:
+        directory: Directory to search for checkpoints
+        
+    Returns:
+        Path to the latest checkpoint file, or None if no checkpoints found
+        
+    Example:
+        >>> find_latest_checkpoint("checkpoints")
+        'checkpoints/model_iter_900.pt'
+    """
+    if not os.path.exists(directory):
+        return None
+    
+    # Find all checkpoint files matching the pattern
+    pattern = os.path.join(directory, "model_iter_*.pt")
+    checkpoint_files = glob.glob(pattern)
+    
+    if not checkpoint_files:
+        return None
+    
+    # Extract iteration numbers and find the maximum
+    def extract_iteration(filepath: str) -> int:
+        """Extract iteration number from checkpoint filename."""
+        match = re.search(r'model_iter_(\d+)\.pt$', filepath)
+        return int(match.group(1)) if match else 0
+    
+    # Sort by iteration number and return the latest
+    latest = max(checkpoint_files, key=extract_iteration)
+    iteration = extract_iteration(latest)
+    
+    print(f"🔍 Found latest checkpoint: {latest} (iteration {iteration})")
+    return latest
+
+
 from mcts.mcts import MCTS, MCTSPlayer
 
 
@@ -1418,7 +1464,8 @@ def main():
         python train.py                                    # Default settings
         python train.py --num-iterations 500               # More iterations
         python train.py --device mps --workers 8           # Custom hardware
-        python train.py --resume checkpoints/model.pt      # Resume training
+        python train.py --resume                           # Resume from latest checkpoint (auto-detect)
+        python train.py --resume checkpoints/model.pt      # Resume from specific checkpoint
     """
     import argparse
     
@@ -1462,8 +1509,9 @@ def main():
                        help="Parallel self-play workers (0=auto, default: 0)")
     
     # Resume training
-    parser.add_argument("--resume", type=str, default=None,
-                       help="Resume training from checkpoint file")
+    # nargs='?' allows: --resume (uses 'auto'), --resume path.pt (uses path.pt), or omitted (None)
+    parser.add_argument("--resume", type=str, nargs='?', const='auto', default=None,
+                       help="Resume training from checkpoint (--resume for latest, or --resume path.pt for specific)")
     
     args = parser.parse_args()
     
@@ -1479,7 +1527,16 @@ def main():
     
     # Resume from checkpoint if specified
     if args.resume:
-        trainer.load(args.resume)
+        if args.resume == 'auto':
+            # Auto-detect latest checkpoint
+            checkpoint_path = find_latest_checkpoint(args.save_path)
+            if checkpoint_path:
+                trainer.load(checkpoint_path)
+            else:
+                print(f"⚠️ No checkpoints found in '{args.save_path}', starting fresh training")
+        else:
+            # Use specified checkpoint path
+            trainer.load(args.resume)
     
     # Start training
     trainer.train(
