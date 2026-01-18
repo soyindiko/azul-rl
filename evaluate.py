@@ -38,6 +38,7 @@ import sys
 import traceback
 import json
 import re
+import glob
 from datetime import datetime
 
 from azul.game import AzulGame
@@ -55,6 +56,47 @@ try:
 except RuntimeError:
     # Already set - ignore
     pass
+
+
+# =============================================================================
+# CHECKPOINT UTILITIES
+# =============================================================================
+
+def find_latest_checkpoint(directory: str = "checkpoints") -> Optional[str]:
+    """
+    Find the most recent checkpoint file in the specified directory.
+    
+    Searches for files matching 'model_iter_*.pt' pattern and returns
+    the one with the highest iteration number.
+    
+    Args:
+        directory: Directory to search for checkpoints
+        
+    Returns:
+        Path to the latest checkpoint file, or None if no checkpoints found
+    """
+    if not os.path.exists(directory):
+        return None
+    
+    # Find all checkpoint files matching the pattern
+    pattern = os.path.join(directory, "model_iter_*.pt")
+    checkpoint_files = glob.glob(pattern)
+    
+    if not checkpoint_files:
+        return None
+    
+    # Extract iteration numbers and find the maximum
+    def extract_iteration(filepath: str) -> int:
+        """Extract iteration number from checkpoint filename."""
+        match = re.search(r'model_iter_(\d+)\.pt', filepath)
+        return int(match.group(1)) if match else 0
+    
+    # Sort by iteration number and return the latest
+    latest = max(checkpoint_files, key=extract_iteration)
+    iteration = extract_iteration(latest)
+    
+    print(f"🔍 Found latest checkpoint: {latest} (iteration {iteration})")
+    return latest
 
 
 # =============================================================================
@@ -997,25 +1039,31 @@ def show_evaluation_history(history_file: str = DEFAULT_HISTORY_FILE) -> None:
         except:
             date_str = "?"
         
-        # Get win rates
-        vs_random = entry.get("results", {}).get("vs_random", {})
-        vs_greedy = entry.get("results", {}).get("vs_greedy", {})
+        # Get win rates (None if not evaluated)
+        vs_random = entry.get("results", {}).get("vs_random")
+        vs_greedy = entry.get("results", {}).get("vs_greedy")
         
-        random_wr = vs_random.get("win_rate", 0)
-        greedy_wr = vs_greedy.get("win_rate", 0)
-        random_margin = vs_random.get("avg_margin", 0)
-        greedy_margin = vs_greedy.get("avg_margin", 0)
+        random_wr = vs_random.get("win_rate") if vs_random else None
+        greedy_wr = vs_greedy.get("win_rate") if vs_greedy else None
+        random_margin = vs_random.get("avg_margin", 0) if vs_random else None
+        greedy_margin = vs_greedy.get("avg_margin", 0) if vs_greedy else None
         
-        # Use random margin as primary, greedy as secondary
-        margin = random_margin if random_margin != 0 else greedy_margin
+        # Use available margin (random as primary, greedy as secondary)
+        if random_margin is not None:
+            margin = random_margin
+        elif greedy_margin is not None:
+            margin = greedy_margin
+        else:
+            margin = None
         
         games = entry.get("num_games", "?")
         
-        # Color coding based on performance
-        random_str = f"{random_wr:>10.1f}%"
-        greedy_str = f"{greedy_wr:>10.1f}%"
+        # Format strings - show "-" if not evaluated
+        random_str = f"{random_wr:>10.1f}%" if random_wr is not None else "         -"
+        greedy_str = f"{greedy_wr:>10.1f}%" if greedy_wr is not None else "         -"
+        margin_str = f"{margin:>+13.1f}" if margin is not None else "            -"
         
-        print(f"{iter_str:<8} {date_str:<12} {random_str:>12} {greedy_str:>12} {margin:>+13.1f} {games:>8}")
+        print(f"{iter_str:<8} {date_str:<12} {random_str:>12} {greedy_str:>12} {margin_str:>14} {games:>8}")
     
     print("-" * 90)
     print(f"Total evaluations: {len(history)}")
@@ -1025,15 +1073,26 @@ def show_evaluation_history(history_file: str = DEFAULT_HISTORY_FILE) -> None:
         first = history[0]
         last = history[-1]
         
-        first_random = first.get("results", {}).get("vs_random", {}).get("win_rate", 0)
-        last_random = last.get("results", {}).get("vs_random", {}).get("win_rate", 0)
+        # Get first and last values (may be None if not evaluated)
+        first_random_data = first.get("results", {}).get("vs_random")
+        last_random_data = last.get("results", {}).get("vs_random")
+        first_greedy_data = first.get("results", {}).get("vs_greedy")
+        last_greedy_data = last.get("results", {}).get("vs_greedy")
         
-        first_greedy = first.get("results", {}).get("vs_greedy", {}).get("win_rate", 0)
-        last_greedy = last.get("results", {}).get("vs_greedy", {}).get("win_rate", 0)
+        first_random = first_random_data.get("win_rate") if first_random_data else None
+        last_random = last_random_data.get("win_rate") if last_random_data else None
+        first_greedy = first_greedy_data.get("win_rate") if first_greedy_data else None
+        last_greedy = last_greedy_data.get("win_rate") if last_greedy_data else None
         
         print(f"\n📈 Progress Summary:")
-        print(f"   vs Random: {first_random:.1f}% → {last_random:.1f}% ({last_random - first_random:+.1f}%)")
-        print(f"   vs Greedy: {first_greedy:.1f}% → {last_greedy:.1f}% ({last_greedy - first_greedy:+.1f}%)")
+        if first_random is not None and last_random is not None:
+            print(f"   vs Random: {first_random:.1f}% → {last_random:.1f}% ({last_random - first_random:+.1f}%)")
+        else:
+            print(f"   vs Random: -")
+        if first_greedy is not None and last_greedy is not None:
+            print(f"   vs Greedy: {first_greedy:.1f}% → {last_greedy:.1f}% ({last_greedy - first_greedy:+.1f}%)")
+        else:
+            print(f"   vs Greedy: -")
     
     print("=" * 90)
 
@@ -1070,8 +1129,8 @@ def export_history_csv(history_file: str = DEFAULT_HISTORY_FILE, output_file: st
     
     rows = []
     for entry in history:
-        vs_random = entry.get("results", {}).get("vs_random", {})
-        vs_greedy = entry.get("results", {}).get("vs_greedy", {})
+        vs_random = entry.get("results", {}).get("vs_random") or {}
+        vs_greedy = entry.get("results", {}).get("vs_greedy") or {}
         
         row = [
             entry.get("timestamp", ""),
@@ -1110,7 +1169,8 @@ def evaluate_model(
     num_workers: int = 0,
     device: str = "auto",
     save_history: bool = False,
-    history_file: str = DEFAULT_HISTORY_FILE
+    history_file: str = DEFAULT_HISTORY_FILE,
+    opponents: Optional[List[str]] = None
 ) -> Dict:
     """
     Comprehensive evaluation of a trained model against multiple baselines.
@@ -1125,6 +1185,9 @@ def evaluate_model(
         model_path: Path to model checkpoint
         num_games: Games per matchup
         num_simulations: MCTS simulations for neural player
+        opponents: List of opponents to evaluate against. Options: 
+                   'random', 'greedy', 'neural', 'mcts'. 
+                   None means all opponents.
         include_mcts_baseline: Also test against pure MCTS (slow)
         parallel: Use parallel game execution
         num_workers: Number of parallel workers (0 = auto)
@@ -1145,10 +1208,26 @@ def evaluate_model(
     if parallel:
         workers = num_workers if num_workers > 0 else max(1, mp.cpu_count() // 2)
         print(f"   Workers: {workers}")
+    if opponents:
+        print(f"   Opponents: {', '.join(opponents)}")
     print(f"{'='*65}")
     
     all_results = {}
     start_time = time.time()
+    
+    # Normalize opponents list
+    # Valid options: 'random', 'greedy', 'neural', 'mcts'
+    if opponents is None:
+        run_random = True
+        run_greedy = True
+        run_neural = True
+        run_mcts = include_mcts_baseline
+    else:
+        opponents_lower = [o.lower() for o in opponents]
+        run_random = 'random' in opponents_lower
+        run_greedy = 'greedy' in opponents_lower
+        run_neural = 'neural' in opponents_lower
+        run_mcts = 'mcts' in opponents_lower
     
     # Configuration for parallel execution
     neural_config = {
@@ -1165,74 +1244,83 @@ def evaluate_model(
     random_config = {'type': 'random'}
     greedy_config = {'type': 'greedy'}
     
+    test_num = 0
+    
     # -------------------------------------------------------------------------
     # Test 1: Neural+MCTS vs Random
     # This should be an easy win if the model learned anything
     # -------------------------------------------------------------------------
-    print("\n📊 Test 1: Neural+MCTS vs Random")
-    
-    if parallel:
-        results = play_match_parallel(
-            neural_config, random_config,
-            num_games=num_games,
-            num_workers=num_workers,
-            desc="Neural+MCTS vs Random"
-        )
-    else:
-        neural_player = NeuralPlayer(model_path, use_mcts=True, 
-                                      num_simulations=num_simulations, device=device)
-        results = play_match(neural_player, RandomPlayer(), num_games)
-    
-    print_results("Neural+MCTS", "Random", results)
-    all_results["vs_random"] = results
+    if run_random:
+        test_num += 1
+        print(f"\n📊 Test {test_num}: Neural+MCTS vs Random")
+        
+        if parallel:
+            results = play_match_parallel(
+                neural_config, random_config,
+                num_games=num_games,
+                num_workers=num_workers,
+                desc="Neural+MCTS vs Random"
+            )
+        else:
+            neural_player = NeuralPlayer(model_path, use_mcts=True, 
+                                          num_simulations=num_simulations, device=device)
+            results = play_match(neural_player, RandomPlayer(), num_games)
+        
+        print_results("Neural+MCTS", "Random", results)
+        all_results["vs_random"] = results
     
     # -------------------------------------------------------------------------
     # Test 2: Neural+MCTS vs Greedy
     # Greedy is a reasonable baseline with simple strategy
     # -------------------------------------------------------------------------
-    print("\n📊 Test 2: Neural+MCTS vs Greedy")
-    
-    if parallel:
-        results = play_match_parallel(
-            neural_config, greedy_config,
-            num_games=num_games,
-            num_workers=num_workers,
-            desc="Neural+MCTS vs Greedy"
-        )
-    else:
-        neural_player = NeuralPlayer(model_path, use_mcts=True,
-                                      num_simulations=num_simulations, device=device)
-        results = play_match(neural_player, GreedyPlayer(), num_games)
-    
-    print_results("Neural+MCTS", "Greedy", results)
-    all_results["vs_greedy"] = results
+    if run_greedy:
+        test_num += 1
+        print(f"\n📊 Test {test_num}: Neural+MCTS vs Greedy")
+        
+        if parallel:
+            results = play_match_parallel(
+                neural_config, greedy_config,
+                num_games=num_games,
+                num_workers=num_workers,
+                desc="Neural+MCTS vs Greedy"
+            )
+        else:
+            neural_player = NeuralPlayer(model_path, use_mcts=True,
+                                          num_simulations=num_simulations, device=device)
+            results = play_match(neural_player, GreedyPlayer(), num_games)
+        
+        print_results("Neural+MCTS", "Greedy", results)
+        all_results["vs_greedy"] = results
     
     # -------------------------------------------------------------------------
     # Test 3: Neural (no MCTS) vs Random
     # Tests the raw network quality without search
     # -------------------------------------------------------------------------
-    print("\n📊 Test 3: Neural (no MCTS) vs Random")
-    
-    if parallel:
-        results = play_match_parallel(
-            neural_no_mcts_config, random_config,
-            num_games=num_games,
-            num_workers=num_workers,
-            desc="Neural vs Random"
-        )
-    else:
-        neural_no_mcts = NeuralPlayer(model_path, use_mcts=False, device=device)
-        results = play_match(neural_no_mcts, RandomPlayer(), num_games)
-    
-    print_results("Neural", "Random", results)
-    all_results["neural_only_vs_random"] = results
+    if run_neural:
+        test_num += 1
+        print(f"\n📊 Test {test_num}: Neural (no MCTS) vs Random")
+        
+        if parallel:
+            results = play_match_parallel(
+                neural_no_mcts_config, random_config,
+                num_games=num_games,
+                num_workers=num_workers,
+                desc="Neural vs Random"
+            )
+        else:
+            neural_no_mcts = NeuralPlayer(model_path, use_mcts=False, device=device)
+            results = play_match(neural_no_mcts, RandomPlayer(), num_games)
+        
+        print_results("Neural", "Random", results)
+        all_results["neural_only_vs_random"] = results
     
     # -------------------------------------------------------------------------
     # Test 4: Pure MCTS vs Random (baseline)
     # Shows how much the network helps MCTS
     # -------------------------------------------------------------------------
-    if include_mcts_baseline:
-        print("\n📊 Test 4: Pure MCTS vs Random (baseline)")
+    if run_mcts:
+        test_num += 1
+        print(f"\n📊 Test {test_num}: Pure MCTS vs Random (baseline)")
         
         mcts_config = {'type': 'mcts', 'num_simulations': num_simulations}
         
@@ -1539,6 +1627,19 @@ Examples:
         default=None,
         help="Second model for head-to-head comparison"
     )
+    parser.add_argument(
+        "--latest", "-l",
+        action="store_true",
+        help="Evaluate the latest checkpoint in checkpoints/ directory"
+    )
+    parser.add_argument(
+        "--only",
+        type=str,
+        nargs="+",
+        choices=["random", "greedy", "neural", "mcts"],
+        default=None,
+        help="Only evaluate against specific opponents (e.g., --only greedy random)"
+    )
     
     # Evaluation parameters
     parser.add_argument(
@@ -1632,6 +1733,14 @@ Examples:
         export_history_csv(args.history_file, args.export_csv)
         return
     
+    # Handle --latest: find latest checkpoint
+    model_path = args.model
+    if args.latest:
+        model_path = find_latest_checkpoint()
+        if not model_path:
+            print("❌ No checkpoints found in 'checkpoints/' directory")
+            return
+    
     # Route to appropriate function
     if args.quick_test:
         quick_test(
@@ -1648,9 +1757,9 @@ Examples:
             parallel=parallel,
             num_workers=args.workers
         )
-    elif args.model:
+    elif model_path:
         evaluate_model(
-            args.model,
+            model_path,
             num_games=args.games,
             num_simulations=args.simulations,
             include_mcts_baseline=not args.no_mcts_baseline,
@@ -1658,16 +1767,19 @@ Examples:
             num_workers=args.workers,
             device=args.device,
             save_history=args.save_history,
-            history_file=args.history_file
+            history_file=args.history_file,
+            opponents=args.only
         )
     else:
         # No arguments - show help
         print("🎯 Azul Model Evaluation Tool")
         print("=" * 50)
         print("\nUsage:")
-        print("  Evaluate model:   python evaluate.py --model checkpoints/model.pt")
-        print("  Compare models:   python evaluate.py --model1 v1.pt --model2 v2.pt")
-        print("  Quick test:       python evaluate.py --quick-test")
+        print("  Evaluate model:     python evaluate.py --model checkpoints/model.pt")
+        print("  Evaluate latest:    python evaluate.py --latest")
+        print("  Only vs Greedy:     python evaluate.py --latest --only greedy")
+        print("  Compare models:     python evaluate.py --model1 v1.pt --model2 v2.pt")
+        print("  Quick test:         python evaluate.py --quick-test")
         print("\nRun with --help for all options.")
         print("\n💡 Tip: Run --quick-test first to verify everything works!")
 

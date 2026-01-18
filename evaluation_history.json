@@ -610,5 +610,357 @@
         "total_games": 25
       }
     }
+  },
+  {
+    "timestamp": "2026-01-17T19:42:45.908620",
+    "model_path": "checkpoints/model_iter_1050.pt",
+    "model_name": "model_iter_1050.pt",
+    "iteration": 1050,
+    "num_games": 100,
+    "num_simulations": 50,
+    "results": {
+      "vs_random": {
+        "win_rate": 70.0,
+        "avg_score": 1.76,
+        "avg_margin": -1.46,
+        "total_games": 100
+      },
+      "vs_greedy": {
+        "win_rate": 0.0,
+        "avg_score": 1.31,
+        "avg_margin": -50.45,
+        "total_games": 100
+      },
+      "neural_only_vs_random": {
+        "win_rate": 59.0,
+        "avg_score": 1.66,
+        "avg_margin": -1.87,
+        "total_games": 100
+      },
+      "mcts_baseline": {
+        "win_rate": 96.0,
+        "avg_score": 5.48,
+        "avg_margin": 4.16,
+        "total_games": 25
+      }
+    }
+  },
+  {
+    "timestamp": "2026-01-17T20:24:52.820461",
+    "model_path": "checkpoints/model_iter_1150.pt",
+    "model_name": "model_iter_1150.pt",
+    "iteration": 1150,
+    "num_games": 100,
+    "num_simulations": 50,
+    "results": {
+      "vs_random": {
+        "win_rate": 82.0,
+        "avg_score": 1.84,
+        "avg_margin": 0.27,
+        "total_games": 100
+      },
+      "vs_greedy": {
+        "win_rate": 0.0,
+        "avg_score": 1.26,
+        "avg_margin": -51.4,
+        "total_games": 100
+      },
+      "neural_only_vs_random": {
+        "win_rate": 66.0,
+        "avg_score": 1.9,
+        "avg_margin": -0.96,
+        "total_games": 100
+      },
+      "mcts_baseline": {
+        "win_rate": 100.0,
+        "avg_score": 8.12,
+        "avg_margin": 7.68,
+        "total_games": 25
+      }
+    }
+  },
+  {
+    "timestamp": "2026-01-17T20:30:16.781051",
+    "model_path": "checkpoints/model_iter_1200.pt",
+    "model_name": "model_iter_1200.pt",
+    "iteration": 1200,
+    "num_games": 100,
+    "num_simulations": 50,
+    "results": {
+      "vs_random": {
+        "win_rate": 78.0,
+        "avg_score": 1.84,
+        "avg_margin": 0.25,
+        "total_games": 100
+      },
+      "vs_greedy": {
+        "win_rate": 0.0,
+        "avg_score": 1.2,
+        "avg_margin": -50.85,
+        "total_games": 100
+      },
+      "neural_only_vs_random": {
+        "win_rate": 67.0,
+        "avg_score": 1.85,
+        "avg_margin": -0.79,
+        "total_games": 100
+      },
+      "mcts_baseline": {
+        "win_rate": 100.0,
+        "avg_score": 7.68,
+        "avg_margin": 7.36,
+        "total_games": 25
+      }
+    }
+  },
+  {
+    "timestamp": "2026-01-17T22:43:42.838653",
+    "model_path": "checkpoints/model_iter_1250.pt",
+    "model_name": "model_iter_1250.pt",
+    "iteration": 1250,
+    "num_games": 100,
+    "num_simulations": 50,
+    "results": {
+      "vs_random": {
+        "win_rate": 78.0,
+        "avg_score": 1.78,
+        "avg_margin": 0.3,
+        "total_games": 100
+      },
+      "vs_greedy": {
+        "win_rate": 0.0,
+        "avg_score": 1.36,
+        "avg_margin": -52.16,
+        "total_games": 100
+      },
+      "neural_only_vs_random": {
+        "win_rate": 65.0,
+        "avg_score": 1.78,
+        "avg_margin": -0.46,
+        "total_games": 100
+      },
+      "mcts_baseline": {
+        "win_rate": 96.0,
+        "avg_score": 10.8,
+        "avg_margin": 9.48,
+        "total_games": 25
+      }
+    }
+  },
+  {
+    "timestamp": "2026-01-17T23:13:44.348870",
+    "model_path": "checkpoints/model_iter_1300.pt",
+    "model_name": "model_iter_1300.pt",
+    "iteration": 1300,
+    "num_games": 100,
+    "num_simulations": 50,
+    "results": {
+      "vs_random": {
+        "win_rate": 78.0,
+        "avg_score": 1.78,
+        "avg_margin": -0.77,
+        "total_games": 100
+      },
+      "vs_greedy": {
+        "win_rate": 0.0,
+        "avg_score": 1.3,
+        "avg_margin": -51.43,
+        "total_games": 100
+      },
+      "neural_only_vs_random": {
+        "win_rate": 67.0,
+        "avg_score": 1.72,
+        "avg_margin": -0.66,
+        "total_games": 100
+      },
+      "mcts_baseline": {
+        "win_rate": 100.0,
+        "avg_score": 7.44,
+        "avg_margin": 6.2,
+        "total_games": 25
+      }
+    }
+  },
+  {
+    "timestamp": "2026-01-17T23:27:26.244822",
+    "model_path": "checkpoints/model_iter_1350.pt",
+    "model_name": "model_iter_1350.pt",
+    "iteration": 1350,
+    "num_games": 100,
+    "num_simulations": 50,
+    "results": {
+      "vs_random": {
+        "win_rate": 86.0,
+        "avg_score": 1.98,
+        "avg_margin": 0.36,
+        "total_games": 100
+      },
+      "vs_greedy": {
+        "win_rate": 0.0,
+        "avg_score": 1.22,
+        "avg_margin": -54.1,
+        "total_games": 100
+      },
+      "neural_only_vs_random": {
+        "win_rate": 67.0,
+        "avg_score": 1.78,
+        "avg_margin": -0.61,
+        "total_games": 100
+      },
+      "mcts_baseline": {
+        "win_rate": 100.0,
+        "avg_score": 7.56,
+        "avg_margin": 7.24,
+        "total_games": 25
+      }
+    }
+  },
+  {
+    "timestamp": "2026-01-18T06:33:18.872047",
+    "model_path": "checkpoints/model_iter_2450.pt",
+    "model_name": "model_iter_2450.pt",
+    "iteration": 2450,
+    "num_games": 100,
+    "num_simulations": 50,
+    "results": {
+      "vs_random": {
+        "win_rate": 85.0,
+        "avg_score": 1.92,
+        "avg_margin": 0.55,
+        "total_games": 100
+      },
+      "vs_greedy": {
+        "win_rate": 0.0,
+        "avg_score": 1.62,
+        "avg_margin": -50.75,
+        "total_games": 100
+      },
+      "neural_only_vs_random": {
+        "win_rate": 79.0,
+        "avg_score": 1.92,
+        "avg_margin": 0.26,
+        "total_games": 100
+      },
+      "mcts_baseline": {
+        "win_rate": 96.0,
+        "avg_score": 7.32,
+        "avg_margin": 6.76,
+        "total_games": 25
+      }
+    }
+  },
+  {
+    "timestamp": "2026-01-18T12:58:56.014689",
+    "model_path": "checkpoints/model_iter_3400.pt",
+    "model_name": "model_iter_3400.pt",
+    "iteration": 3400,
+    "num_games": 100,
+    "num_simulations": 50,
+    "results": {
+      "vs_random": {
+        "win_rate": 81.0,
+        "avg_score": 2.13,
+        "avg_margin": 0.35,
+        "total_games": 100
+      },
+      "vs_greedy": {
+        "win_rate": 0.0,
+        "avg_score": 2.24,
+        "avg_margin": -51.57,
+        "total_games": 100
+      },
+      "neural_only_vs_random": {
+        "win_rate": 71.0,
+        "avg_score": 1.95,
+        "avg_margin": -0.4,
+        "total_games": 100
+      },
+      "mcts_baseline": {
+        "win_rate": 100.0,
+        "avg_score": 6.44,
+        "avg_margin": 5.96,
+        "total_games": 25
+      }
+    }
+  },
+  {
+    "timestamp": "2026-01-18T13:48:55.464888",
+    "model_path": "checkpoints/model_iter_3400.pt",
+    "model_name": "model_iter_3400.pt",
+    "iteration": 3400,
+    "num_games": 200,
+    "num_simulations": 800,
+    "results": {
+      "vs_greedy": {
+        "win_rate": 0.0,
+        "avg_score": 2.28,
+        "avg_margin": -50.7,
+        "total_games": 200
+      }
+    }
+  },
+  {
+    "timestamp": "2026-01-18T13:58:43.487168",
+    "model_path": "checkpoints/model_iter_3400.pt",
+    "model_name": "model_iter_3400.pt",
+    "iteration": 3400,
+    "num_games": 200,
+    "num_simulations": 200,
+    "results": {
+      "vs_greedy": {
+        "win_rate": 0.0,
+        "avg_score": 2.1,
+        "avg_margin": -51.79,
+        "total_games": 200
+      }
+    }
+  },
+  {
+    "timestamp": "2026-01-18T14:16:56.707368",
+    "model_path": "checkpoints/model_iter_3450.pt",
+    "model_name": "model_iter_3450.pt",
+    "iteration": 3450,
+    "num_games": 200,
+    "num_simulations": 200,
+    "results": {
+      "vs_greedy": {
+        "win_rate": 0.0,
+        "avg_score": 2.18,
+        "avg_margin": -50.9,
+        "total_games": 200
+      }
+    }
+  },
+  {
+    "timestamp": "2026-01-18T14:44:13.743442",
+    "model_path": "checkpoints/model_iter_3475.pt",
+    "model_name": "model_iter_3475.pt",
+    "iteration": 3475,
+    "num_games": 50,
+    "num_simulations": 200,
+    "results": {
+      "vs_greedy": {
+        "win_rate": 0.0,
+        "avg_score": 2.2,
+        "avg_margin": -51.34,
+        "total_games": 50
+      }
+    }
+  },
+  {
+    "timestamp": "2026-01-18T17:43:05.803654",
+    "model_path": "checkpoints/model_iter_3675.pt",
+    "model_name": "model_iter_3675.pt",
+    "iteration": 3675,
+    "num_games": 50,
+    "num_simulations": 200,
+    "results": {
+      "vs_greedy": {
+        "win_rate": 0.0,
+        "avg_score": 2.6,
+        "avg_margin": -47.06,
+        "total_games": 50
+      }
+    }
   }
 ]

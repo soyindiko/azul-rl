@@ -1410,6 +1410,62 @@ class Trainer:
             checkpoint["scaler_state_dict"] = self.scaler.state_dict()
         
         torch.save(checkpoint, path)
+        
+        # Save replay buffer to a separate file (overwrites previous)
+        # This saves only ONE buffer file to avoid filling up disk
+        buffer_path = os.path.join(os.path.dirname(path), "replay_buffer.pt")
+        self.save_buffer(buffer_path)
+    
+    def save_buffer(self, path: str) -> None:
+        """
+        Save replay buffer to disk.
+        
+        The buffer is saved separately from checkpoints to:
+        1. Avoid bloating every checkpoint file
+        2. Allow resuming training with accumulated experience
+        
+        Only ONE buffer file is kept (overwrites previous).
+        
+        Args:
+            path: File path for the buffer
+        """
+        if len(self.buffer) == 0:
+            return
+        
+        # Convert deque to list for serialization
+        buffer_data = list(self.buffer.buffer)
+        torch.save({
+            "buffer": buffer_data,
+            "capacity": self.buffer.buffer.maxlen
+        }, path)
+        print(f"💾 Saved replay buffer ({len(self.buffer)} experiences)")
+    
+    def load_buffer(self, path: str) -> bool:
+        """
+        Load replay buffer from disk if it exists.
+        
+        Args:
+            path: File path to the buffer
+            
+        Returns:
+            True if buffer was loaded, False otherwise
+        """
+        if not os.path.exists(path):
+            return False
+        
+        try:
+            data = torch.load(path, map_location='cpu')
+            buffer_data = data["buffer"]
+            
+            # Push experiences to buffer
+            for exp in buffer_data:
+                self.buffer.buffer.append(exp)
+            
+            print(f"📂 Loaded replay buffer ({len(self.buffer)} experiences)")
+            return True
+        except Exception as e:
+            print(f"⚠️ Could not load buffer: {e}")
+            return False
     
     def load(self, path: str) -> None:
         """
@@ -1445,9 +1501,14 @@ class Trainer:
         history_path = os.path.join(checkpoint_dir, "training_history.json")
         self.load_training_history(history_path)
         
+        # Try to load replay buffer from the same directory
+        buffer_path = os.path.join(checkpoint_dir, "replay_buffer.pt")
+        self.load_buffer(buffer_path)
+        
         print(f"📂 Loaded checkpoint from iteration {self.iteration + 1}")
         print(f"   Games played: {self.games_played}")
         print(f"   Train steps: {self.train_steps}")
+        print(f"   Buffer size: {len(self.buffer)}")
 
 
 # =============================================================================
